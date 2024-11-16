@@ -1,0 +1,94 @@
+#!/bin/bash
+
+# Ensure required commands are available
+if ! command -v wit &> /dev/null; then
+    echo "Error: 'wit' (Wiimms ISO Tool) is not installed. Please install it to proceed."
+    exit 1
+fi
+
+if ! command -v curl &> /dev/null; then
+    echo "Error: 'curl' is not installed. Please install it to proceed."
+    exit 1
+fi
+
+# Set the source and destination directories
+WBFS_DIR="/media/connor/D856-65C9/wbfs/"
+COVER_DIR="/media/connor/D856-65C9/wiiflow/boxcovers/"
+DISC_COVER_DIR="/media/connor/D856-65C9/wiiflow/covers/"
+
+# Create cover directories if they don't exist
+mkdir -p "$COVER_DIR"
+mkdir -p "$DISC_COVER_DIR"
+
+# Function to extract GameID from filename
+extract_gameid_from_filename() {
+    local filename="$1"
+    local gameid="${filename%.wbfs}" # Remove .wbfs extension
+    if [[ ${#gameid} -eq 6 ]]; then
+        echo "$gameid"
+    else
+        echo ""
+    fi
+}
+
+# Function to extract GameID using 'wit'
+extract_gameid_with_wit() {
+    local wbfs_file="$1"
+    wit dump -x "$wbfs_file" 2>/dev/null | grep '^ *ID6:' | awk '{print $2}'
+}
+
+# Process all WBFS files
+find "$WBFS_DIR" -type f -name '*.wbfs' | while read -r wbfs_file; do
+    echo "Processing file: $wbfs_file"
+
+    filename=$(basename "$wbfs_file")
+    gameid=$(extract_gameid_from_filename "$filename")
+
+    if [ -n "$gameid" ]; then
+        echo "Found GameID in filename: $gameid"
+    else
+        echo "GameID not found in filename, extracting from WBFS file..."
+        gameid=$(extract_gameid_with_wit "$wbfs_file")
+        if [ -z "$gameid" ]; then
+            echo "Could not extract GameID from $wbfs_file"
+            continue
+        fi
+        echo "Extracted GameID: $gameid"
+    fi
+
+    # Download box cover
+    box_cover_success=0
+    for region in "US" "EN" "JA" "EU" "KO"; do
+        cover_url="https://art.gametdb.com/wii/coverfull/${region}/${gameid}.png"
+        output_file="${COVER_DIR}/${gameid}.png"
+        echo "Attempting to download box cover from: $cover_url"
+        curl -sfL "$cover_url" -o "$output_file"
+        if [ $? -eq 0 ]; then
+            echo "Successfully downloaded box cover for GameID: $gameid from region: $region"
+            box_cover_success=1
+            break
+        fi
+    done
+    if [ $box_cover_success -ne 1 ]; then
+        echo "Failed to download box cover for GameID: $gameid"
+    fi
+
+    # Download disc cover
+    disc_cover_success=0
+    for region in "US" "EN" "JA" "EU" "KO"; do
+        disc_url="https://art.gametdb.com/wii/disc/${region}/${gameid}.png"
+        output_file="${DISC_COVER_DIR}/${gameid}.png"
+        echo "Attempting to download disc cover from: $disc_url"
+        curl -sfL "$disc_url" -o "$output_file"
+        if [ $? -eq 0 ]; then
+            echo "Successfully downloaded disc cover for GameID: $gameid from region: $region"
+            disc_cover_success=1
+            break
+        fi
+    done
+    if [ $disc_cover_success -ne 1 ]; then
+        echo "Failed to download disc cover for GameID: $gameid"
+    fi
+done
+
+echo "Cover download process completed."
